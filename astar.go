@@ -2,12 +2,13 @@ package goka
 
 import (
 	"container/heap"
+	"iter"
 	"slices"
 )
 
 type Heuristic[T comparable] func(T) float64
 type Cost[T comparable] func(T) float64
-type Successor[T comparable] func(T) []T
+type Successor[T comparable] func(T) iter.Seq[T]
 
 type AStar[T comparable] struct {
 	start     *Node[T]
@@ -60,7 +61,7 @@ func (a *AStar[T]) Run() []T {
 		}
 
 	successors_loop:
-		for _, nextID := range a.next(current.ID) {
+		for nextID := range a.next(current.ID) {
 			successor := &Node[T]{
 				ID:     nextID,
 				Parent: current,

@@ -2,6 +2,7 @@ package goka
 
 import (
 	"fmt"
+	"iter"
 	"math"
 )
 
@@ -37,20 +38,22 @@ func ExampleAStar() {
 		return grid[p.Y][p.X]
 	}
 
-	// 5. Function generating neighbors (Moves: Left, Right, Up, Down)
-	next := func(p Point) []Point {
-		var neighbors []Point
-		// Directions in order: Left, Right, Up, Down
-		dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
+	// 5. Function generating neighbors using iterators (Zero allocations!)
+	next := func(p Point) iter.Seq[Point] {
+		return func(yield func(Point) bool) {
+			dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
 
-		for _, d := range dirs {
-			nx, ny := p.X+d.X, p.Y+d.Y
-			// Add neighbor only if it doesn't go out of bounds of the 64x64 map
-			if nx >= 0 && nx < size && ny >= 0 && ny < size {
-				neighbors = append(neighbors, Point{X: nx, Y: ny})
+			for _, d := range dirs {
+				nx, ny := p.X+d.X, p.Y+d.Y
+				if nx >= 0 && nx < size && ny >= 0 && ny < size {
+					// Yield the neighbor to the for-range loop in AStar.Run()
+					// If the loop terminates early (yield returns false), stop generating.
+					if !yield(Point{X: nx, Y: ny}) {
+						return
+					}
+				}
 			}
 		}
-		return neighbors
 	}
 
 	astar := NewAStar(start, goal, heuristic, cost, next)
