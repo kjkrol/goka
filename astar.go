@@ -6,6 +6,8 @@ import (
 	"slices"
 )
 
+const init_map_size = 1024
+
 type Heuristic[T comparable] func(T) float64
 type Cost[T comparable] func(T) float64
 type Successor[T comparable] func(T) iter.Seq[T]
@@ -22,33 +24,51 @@ type AStar[T comparable] struct {
 }
 
 func NewAStar[T comparable](
-	start, goal T,
 	heuristic Heuristic[T],
 	cost Cost[T],
 	next Successor[T],
 ) *AStar[T] {
 	openPQ := &PriorityQueue[T]{}
 	heap.Init(openPQ)
-	open := make(map[T]*Node[T])
-
-	startNode := &Node[T]{
-		ID: start,
-		G:  0,
-		F:  heuristic(start),
-	}
-	heap.Push(openPQ, startNode)
-	open[start] = startNode
+	open := make(map[T]*Node[T], init_map_size)
+	closed := make(map[T]*Node[T], init_map_size)
 
 	return &AStar[T]{
-		start:     startNode,
-		goal:      &Node[T]{ID: goal},
 		heuristic: heuristic,
 		cost:      cost,
 		openPQ:    openPQ,
 		open:      open,
-		closed:    make(map[T]*Node[T]),
+		closed:    closed,
 		next:      next,
 	}
+}
+
+func (a *AStar[T]) Init(start, goal T) {
+	startNode := &Node[T]{
+		ID: start,
+		G:  0,
+		F:  a.heuristic(start),
+	}
+	heap.Push(a.openPQ, startNode)
+	a.open[start] = startNode
+	a.start = startNode
+	a.goal = &Node[T]{ID: goal}
+}
+
+func (a *AStar[T]) Reset() {
+	// Clear maps but keep their allocated capacity for the next run
+	clear(a.open)
+	clear(a.closed)
+
+	// Prevent memory leaks by nil-ing out pointers in the underlying slice,
+	// then reset the length to 0 while keeping the capacity
+	if a.openPQ != nil {
+		clear(*a.openPQ)
+		*a.openPQ = (*a.openPQ)[:0]
+	}
+
+	a.start = nil
+	a.goal = nil
 }
 
 func (a *AStar[T]) Run() []T {
@@ -62,39 +82,39 @@ func (a *AStar[T]) Run() []T {
 
 	successors_loop:
 		for nextID := range a.next(current.ID) {
-			successor := &Node[T]{
-				ID:     nextID,
-				Parent: current,
-			}
-			successor.G = current.G + a.cost(nextID)
-			successor.F = successor.G + a.heuristic(nextID)
+			tentativeG := current.G + a.cost(nextID)
+			tentativeF := tentativeG + a.heuristic(nextID)
 
 			inOpen := false
-			if existingNode, ok := a.open[successor.ID]; ok {
-				if existingNode.F <= successor.F {
+			if existingNode, ok := a.open[nextID]; ok {
+				if existingNode.G <= tentativeG {
 					continue successors_loop
 				}
 				inOpen = ok
 			}
 
-			if existingNode, ok := a.closed[successor.ID]; ok {
-				if existingNode.F <= successor.F {
+			if existingNode, ok := a.closed[nextID]; ok {
+				if existingNode.G <= tentativeG {
 					continue successors_loop
 				}
 				delete(a.closed, nextID)
 			}
 
 			if inOpen {
-				// refresh existing node
 				x := a.open[nextID]
 				x.Parent = current
-				x.G = successor.G
-				x.F = successor.F
+				x.G = tentativeG
+				x.F = tentativeF
 				heap.Fix(a.openPQ, x.Index)
 			} else {
-				// add new node
-				a.open[nextID] = successor
-				heap.Push(a.openPQ, successor)
+				newNode := &Node[T]{
+					ID:     nextID,
+					Parent: current,
+					G:      tentativeG,
+					F:      tentativeF,
+				}
+				a.open[nextID] = newNode
+				heap.Push(a.openPQ, newNode)
 			}
 		}
 

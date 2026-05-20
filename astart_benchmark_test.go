@@ -50,6 +50,8 @@ func BenchmarkAStar(b *testing.B) {
 		}
 	}
 
+	astar := NewAStar(heuristic, cost, next)
+
 	// 2. Reset the timer!
 	// This ensures the time needed to generate the map is not included in the result.
 	b.ResetTimer()
@@ -58,7 +60,7 @@ func BenchmarkAStar(b *testing.B) {
 	// Go will automatically adjust the value of b.N so the test runs long enough
 	// (usually about 1 second) for reliable results.
 	for i := 0; i < b.N; i++ {
-		astar := NewAStar(start, goal, heuristic, cost, next)
+		astar.Init(start, goal)
 		_ = astar.Run() // We don't care about the returned result in the benchmark
 	}
 }

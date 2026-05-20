@@ -56,7 +56,8 @@ func ExampleAStar() {
 		}
 	}
 
-	astar := NewAStar(start, goal, heuristic, cost, next)
+	astar := NewAStar(heuristic, cost, next)
+	astar.Init(start, goal)
 	path := astar.Run()
 
 	if len(path) > 0 {
