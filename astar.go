@@ -14,13 +14,11 @@ type SuccessorSupplier[T comparable] func(T) iter.Seq[T]
 
 type AStar[T comparable] struct {
 	goalID     T
-	openPQ     *openNodesPriorityQueue[T]
-	open       map[T](*Node[T])
-	closed     map[T](*Node[T])
+	open       *open[T]
+	closed     *closed[T]
 	heuristic  Heuristic[T]
 	cost       Cost[T]
 	successors SuccessorSupplier[T]
-	arena      *nodeArena[T]
 }
 
 func NewAStar[T comparable](
@@ -28,31 +26,24 @@ func NewAStar[T comparable](
 	cost Cost[T],
 	successors SuccessorSupplier[T],
 ) *AStar[T] {
-	openPQ := &openNodesPriorityQueue[T]{}
-	heap.Init(openPQ)
-	open := make(map[T]*Node[T], defaultMapSize)
-	closed := make(map[T]*Node[T], defaultMapSize)
-
 	return &AStar[T]{
 		heuristic:  heuristic,
 		cost:       cost,
-		openPQ:     openPQ,
-		open:       open,
-		closed:     closed,
+		open:       newOpen[T](),
+		closed:     newClosed[T](),
 		successors: successors,
-		arena:      newNodeArena[T](),
 	}
 }
 
 func (a *AStar[T]) Init(start, goal T) {
-	a.openPush(start, nil, 0, a.heuristic(start, goal))
+	a.open.push(start, nil, 0, a.heuristic(start, goal))
 	a.goalID = goal
 }
 
 func (a *AStar[T]) Solve() []T {
-	for a.openPQ.Len() > 0 {
+	for a.open.isNotEmpty() {
 
-		current := a.openPop()
+		current := a.open.pop()
 
 		if current.ID == a.goalID {
 			return current.Path()
@@ -62,7 +53,7 @@ func (a *AStar[T]) Solve() []T {
 			a.processSuccessor(successorID, current)
 		}
 
-		a.closed[current.ID] = current
+		a.closed.add(current)
 	}
 	return nil
 }
@@ -71,79 +62,127 @@ func (a *AStar[T]) processSuccessor(successorID T, current *Node[T]) {
 	tentativeG := current.G + a.cost(successorID)
 	tentativeF := tentativeG + a.heuristic(successorID, a.goalID)
 
-	inOpen, isBetter := a.isOpenHasBetter(successorID, tentativeG)
+	inOpen, isBetter := a.open.hasBetter(successorID, tentativeG)
 	if isBetter {
 		return
 	}
 
-	if a.isClosedHasBetter(successorID, tentativeG) {
+	if a.closed.hasBetter(successorID, tentativeG) {
 		return
 	}
 
 	if inOpen {
-		a.openUpdate(successorID, current, tentativeG, tentativeF)
+		a.open.update(successorID, current, tentativeG, tentativeF)
 	} else {
-		a.openPush(successorID, current, tentativeG, tentativeF)
+		a.open.push(successorID, current, tentativeG, tentativeF)
 	}
 }
 
-func (a *AStar[T]) openPush(id T, parent *Node[T], g, f float64) {
-	node := a.arena.Get()
-	node.ID = id
-	node.Parent = parent
-	node.G = g
-	node.F = f
-	node.Index = -1
-	heap.Push(a.openPQ, node)
-	a.open[node.ID] = node
+func (a *AStar[T]) Reset() {
+	a.closed.reset()
+	a.open.reset()
+
+	var zero T
+	a.goalID = zero
 }
 
-func (a *AStar[T]) openUpdate(id T, parent *Node[T], g, f float64) {
-	x := a.open[id]
-	x.Parent = parent
-	x.G = g
-	x.F = f
-	heap.Fix(a.openPQ, x.Index)
+// ---------------
+// Closed Nodes
+// ---------------
+type closed[T comparable] struct {
+	closedMap map[T](*Node[T])
 }
 
-func (a *AStar[T]) openPop() *Node[T] {
-	node := heap.Pop(a.openPQ).(*Node[T])
-	delete(a.open, node.ID)
-	return node
-}
-
-func (a *AStar[T]) isOpenHasBetter(successorID T, tentativeG float64) (exists, hasBetter bool) {
-	if existingNode, ok := a.open[successorID]; ok {
-		exists = true
-		hasBetter = existingNode.G <= tentativeG
+func newClosed[T comparable]() *closed[T] {
+	return &closed[T]{
+		closedMap: make(map[T]*Node[T], defaultMapSize),
 	}
-	return
 }
 
-func (a *AStar[T]) isClosedHasBetter(successorID T, tentativeG float64) bool {
-	if existingNode, ok := a.closed[successorID]; ok {
+func (c *closed[T]) add(node *Node[T]) {
+	c.closedMap[node.ID] = node
+}
+
+func (c *closed[T]) hasBetter(successorID T, tentativeG float64) bool {
+	if existingNode, ok := c.closedMap[successorID]; ok {
 		hasBetter := existingNode.G <= tentativeG
 		if !hasBetter {
-			delete(a.closed, successorID)
+			delete(c.closedMap, successorID)
 		}
 		return hasBetter
 	}
 	return false
 }
 
-func (a *AStar[T]) Reset() {
-	clear(a.open)
-	clear(a.closed)
+func (c *closed[T]) reset() {
+	clear(c.closedMap)
+}
 
-	if a.openPQ != nil {
-		clear(*a.openPQ)
-		*a.openPQ = (*a.openPQ)[:0]
+// ---------------
+// Open Nodes
+// ---------------
+type open[T comparable] struct {
+	openPQ  *openNodesPriorityQueue[T]
+	openMap map[T](*Node[T])
+	arena   *nodeArena[T]
+}
+
+func newOpen[T comparable]() *open[T] {
+	openPQ := &openNodesPriorityQueue[T]{}
+	heap.Init(openPQ)
+	openMap := make(map[T]*Node[T], defaultMapSize)
+
+	return &open[T]{
+		openPQ:  openPQ,
+		openMap: openMap,
+		arena:   newNodeArena[T](),
 	}
+}
 
-	a.arena.Reset()
+func (o *open[T]) isNotEmpty() bool {
+	return o.openPQ.Len() > 0
+}
 
-	var zero T
-	a.goalID = zero
+func (o *open[T]) push(id T, parent *Node[T], g, f float64) {
+	node := o.arena.Get()
+	node.ID = id
+	node.Parent = parent
+	node.G = g
+	node.F = f
+	node.Index = -1
+	heap.Push(o.openPQ, node)
+	o.openMap[node.ID] = node
+}
+
+func (o *open[T]) update(id T, parent *Node[T], g, f float64) {
+	x := o.openMap[id]
+	x.Parent = parent
+	x.G = g
+	x.F = f
+	heap.Fix(o.openPQ, x.Index)
+}
+
+func (o *open[T]) pop() *Node[T] {
+	node := heap.Pop(o.openPQ).(*Node[T])
+	delete(o.openMap, node.ID)
+	return node
+}
+
+func (o *open[T]) hasBetter(successorID T, tentativeG float64) (exists, hasBetter bool) {
+	if existingNode, ok := o.openMap[successorID]; ok {
+		exists = true
+		hasBetter = existingNode.G <= tentativeG
+	}
+	return
+}
+
+func (o *open[T]) reset() {
+	clear(o.openMap)
+	if o.openPQ != nil {
+		clear(*o.openPQ)
+		*o.openPQ = (*o.openPQ)[:0]
+	}
+	o.arena.Reset()
 }
 
 // ---------------
