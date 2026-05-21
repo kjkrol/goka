@@ -213,15 +213,6 @@ func (n *Node[T]) Path() []T {
 	return path
 }
 
-func (n *Node[T]) Reset() {
-	var zero T
-	n.ID = zero
-	n.G = 0
-	n.F = 0
-	n.Parent = nil
-	n.Index = -1
-}
-
 // ---------------
 // (internal) Open Nodes Priority (by Node.F) Queue
 // ---------------
