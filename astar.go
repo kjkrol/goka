@@ -55,24 +55,25 @@ func NewAStar[T comparable](
 }
 
 func (a *AStar[T]) Solve(start, goal T) []T {
-	for current := range a.Iter(start, goal) {
-		if current.ID == goal {
+	for goalAchieved, current := range a.Iter(start, goal) {
+		if goalAchieved {
 			return current.Path()
 		}
 	}
 	return nil
 }
 
-func (a *AStar[T]) Iter(start, goal T) iter.Seq[*Node[T]] {
+func (a *AStar[T]) Iter(start, goal T) iter.Seq2[bool, *Node[T]] {
 	a.reset()
 	a.open.insert(start, nil, 0, a.heuristic(start, goal))
-	return func(yield func(*Node[T]) bool) {
+	return func(yield func(bool, *Node[T]) bool) {
 		for a.open.isNotEmpty() {
 			current := a.open.removeBest()
-			if current.ID != goal {
+			goalAchieved := (current.ID == goal)
+			if !goalAchieved {
 				a.process(current, goal)
 			}
-			if !yield(current) {
+			if !yield(goalAchieved, current) {
 				return
 			}
 		}
