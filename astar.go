@@ -36,46 +36,68 @@ func NewAStar[T comparable](
 }
 
 func (a *AStar[T]) Init(start, goal T) {
-	a.open.push(start, nil, 0, a.heuristic(start, goal))
+	a.open.insert(start, nil, 0, a.heuristic(start, goal))
 	a.goalID = goal
 }
 
 func (a *AStar[T]) Solve() []T {
 	for a.open.isNotEmpty() {
-
-		current := a.open.pop()
-
+		current := a.open.removeBest()
 		if current.ID == a.goalID {
 			return current.Path()
 		}
-
-		for successorID := range a.successors(current.ID) {
-			a.processSuccessor(successorID, current)
-		}
-
-		a.closed.add(current)
+		a.step(current)
 	}
 	return nil
 }
 
-func (a *AStar[T]) processSuccessor(successorID T, current *Node[T]) {
-	tentativeG := current.G + a.cost(successorID)
-	tentativeF := tentativeG + a.heuristic(successorID, a.goalID)
+func (a *AStar[T]) Steps() iter.Seq2[bool, []T] {
+	return func(yield func(bool, []T) bool) {
+		for a.open.isNotEmpty() {
+			current := a.open.removeBest()
 
-	inOpen, isBetter := a.open.hasBetter(successorID, tentativeG)
-	if isBetter {
-		return
-	}
+			if current.ID == a.goalID {
+				yield(true, current.Path())
+				return
+			}
 
-	if a.closed.hasBetter(successorID, tentativeG) {
-		return
-	}
+			a.step(current)
 
-	if inOpen {
-		a.open.update(successorID, current, tentativeG, tentativeF)
-	} else {
-		a.open.push(successorID, current, tentativeG, tentativeF)
+			if !yield(false, current.Path()) {
+				return
+			}
+		}
+
+		yield(false, nil)
 	}
+}
+
+func (a *AStar[T]) step(current *Node[T]) {
+	for successorID := range a.successors(current.ID) {
+		G := current.G + a.cost(successorID)
+		F := G + a.heuristic(successorID, a.goalID)
+
+		inOpen, hasBetter := a.open.containsBetterOrEqual(successorID, G)
+		if hasBetter {
+			continue
+		}
+
+		inClosed, hasBetter := a.closed.containsBetterOrEqual(successorID, G)
+		if hasBetter {
+			continue
+		}
+
+		if inClosed {
+			a.closed.remove(successorID)
+		}
+
+		if inOpen {
+			a.open.update(successorID, current, G, F)
+		} else {
+			a.open.insert(successorID, current, G, F)
+		}
+	}
+	a.closed.insert(current)
 }
 
 func (a *AStar[T]) Reset() {
@@ -99,19 +121,20 @@ func newClosed[T comparable]() *closed[T] {
 	}
 }
 
-func (c *closed[T]) add(node *Node[T]) {
+func (c *closed[T]) insert(node *Node[T]) {
 	c.closedMap[node.ID] = node
 }
 
-func (c *closed[T]) hasBetter(successorID T, tentativeG float64) bool {
+func (c *closed[T]) containsBetterOrEqual(successorID T, tentativeG float64) (exists, hasBetter bool) {
 	if existingNode, ok := c.closedMap[successorID]; ok {
-		hasBetter := existingNode.G <= tentativeG
-		if !hasBetter {
-			delete(c.closedMap, successorID)
-		}
-		return hasBetter
+		exists = true
+		hasBetter = existingNode.G <= tentativeG
 	}
-	return false
+	return
+}
+
+func (c *closed[T]) remove(successorID T) {
+	delete(c.closedMap, successorID)
 }
 
 func (c *closed[T]) reset() {
@@ -143,7 +166,7 @@ func (o *open[T]) isNotEmpty() bool {
 	return o.openPQ.Len() > 0
 }
 
-func (o *open[T]) push(id T, parent *Node[T], g, f float64) {
+func (o *open[T]) insert(id T, parent *Node[T], g, f float64) {
 	node := o.arena.Get()
 	node.ID = id
 	node.Parent = parent
@@ -162,13 +185,14 @@ func (o *open[T]) update(id T, parent *Node[T], g, f float64) {
 	heap.Fix(o.openPQ, x.Index)
 }
 
-func (o *open[T]) pop() *Node[T] {
+// best means the node with the lowest F value, which is at the top of the priority queue
+func (o *open[T]) removeBest() *Node[T] {
 	node := heap.Pop(o.openPQ).(*Node[T])
 	delete(o.openMap, node.ID)
 	return node
 }
 
-func (o *open[T]) hasBetter(successorID T, tentativeG float64) (exists, hasBetter bool) {
+func (o *open[T]) containsBetterOrEqual(successorID T, tentativeG float64) (exists, hasBetter bool) {
 	if existingNode, ok := o.openMap[successorID]; ok {
 		exists = true
 		hasBetter = existingNode.G <= tentativeG
