@@ -28,8 +28,8 @@ func ExampleAStar() {
 
 	// 3. Heuristic function (Manhattan distance for 4-way movement)
 	// Note that the function "sees" the goal variable declared above!
-	heuristic := func(p Point) float64 {
-		return math.Abs(float64(goal.X-p.X)) + math.Abs(float64(goal.Y-p.Y))
+	heuristic := func(p, g Point) float64 {
+		return math.Abs(float64(g.X-p.X)) + math.Abs(float64(g.Y-p.Y))
 	}
 
 	// 4. Cost function
@@ -58,7 +58,7 @@ func ExampleAStar() {
 
 	astar := NewAStar(heuristic, cost, next)
 	astar.Init(start, goal)
-	path := astar.Run()
+	path := astar.Solve()
 
 	if len(path) > 0 {
 		fmt.Println("Path found:", true)

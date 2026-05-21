@@ -6,13 +6,6 @@ import (
 	"testing"
 )
 
-// Make sure you have imported the "testing" package at the top of the file, e.g.:
-// import (
-// 	"iter"
-// 	"math"
-// 	"testing"
-// )
-
 func BenchmarkAStar(b *testing.B) {
 	const size = 64
 
@@ -28,15 +21,15 @@ func BenchmarkAStar(b *testing.B) {
 	start := Point{X: 0, Y: 0}
 	goal := Point{X: 63, Y: 63}
 
-	heuristic := func(p Point) float64 {
-		return math.Abs(float64(goal.X-p.X)) + math.Abs(float64(goal.Y-p.Y))
+	heuristic := func(p, g Point) float64 {
+		return math.Abs(float64(g.X-p.X)) + math.Abs(float64(g.Y-p.Y))
 	}
 
 	cost := func(p Point) float64 {
 		return grid[p.Y][p.X]
 	}
 
-	next := func(p Point) iter.Seq[Point] {
+	successors := func(p Point) iter.Seq[Point] {
 		return func(yield func(Point) bool) {
 			dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
 			for _, d := range dirs {
@@ -50,7 +43,7 @@ func BenchmarkAStar(b *testing.B) {
 		}
 	}
 
-	astar := NewAStar(heuristic, cost, next)
+	astar := NewAStar(heuristic, cost, successors)
 
 	// 2. Reset the timer!
 	// This ensures the time needed to generate the map is not included in the result.
@@ -61,6 +54,6 @@ func BenchmarkAStar(b *testing.B) {
 	// (usually about 1 second) for reliable results.
 	for i := 0; i < b.N; i++ {
 		astar.Init(start, goal)
-		_ = astar.Run() // We don't care about the returned result in the benchmark
+		_ = astar.Solve() // We don't care about the returned result in the benchmark
 	}
 }
