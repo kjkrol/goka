@@ -1,7 +1,6 @@
 package goka
 
 import (
-	"iter"
 	"math"
 	"testing"
 )
@@ -29,21 +28,19 @@ func BenchmarkAStar(b *testing.B) {
 		return grid[p.Y][p.X]
 	}
 
-	successors := func(p Point) iter.Seq[Point] {
-		return func(yield func(Point) bool) {
-			dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-			for _, d := range dirs {
-				nx, ny := p.X+d.X, p.Y+d.Y
-				if nx >= 0 && nx < size && ny >= 0 && ny < size {
-					if !yield(Point{X: nx, Y: ny}) {
-						return
-					}
-				}
+	dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
+	successors := NewBufferedSuccessors(4, func(p Point, buffer []Point) []Point {
+		for _, d := range dirs {
+			nx, ny := p.X+d.X, p.Y+d.Y
+			if nx >= 0 && nx < size && ny >= 0 && ny < size {
+				buffer = append(buffer, Point{X: nx, Y: ny})
 			}
 		}
-	}
+		return buffer
+	})
 
-	astar := NewAStar(heuristic, cost, successors)
+	indexer := func(p Point) int { return p.Y*64 + p.X }
+	astar := NewAStar(heuristic, cost, successors, WithIndexer(4096, indexer))
 
 	// 2. Reset the timer!
 	// This ensures the time needed to generate the map is not included in the result.
@@ -53,7 +50,6 @@ func BenchmarkAStar(b *testing.B) {
 	// Go will automatically adjust the value of b.N so the test runs long enough
 	// (usually about 1 second) for reliable results.
 	for i := 0; i < b.N; i++ {
-		astar.Init(start, goal)
-		_ = astar.Solve() // We don't care about the returned result in the benchmark
+		_ = astar.Solve(start, goal) // We don't care about the returned result in the benchmark
 	}
 }
