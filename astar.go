@@ -34,7 +34,7 @@ type Indexer[T comparable] func(T) int
 type Solver[T comparable] struct {
 	heuristic  Heuristic[T]
 	cost       Cost[T]
-	successors *BufferedSuccessors[T]
+	successors *bufferedSuccessors[T]
 	open       *open[T]
 	closed     *closed[T]
 	current    *node[T]
