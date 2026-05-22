@@ -1,4 +1,4 @@
-# AStar: High-Performance, Generic Solver for Go
+# kjkrol/astar
 
 <p align="center">
   <img src=".github/docs/img/logo.png" alt="kjkrol/astar Logo" width="100">
@@ -17,7 +17,7 @@
   </a>
 </p>
 
-A highly performant, fully generic A* solver for Go. Perfect for optimal pathfinding and abstract state-space search.
+**kjkrol/astart** is a **highly performant, fully generic A*** solver for Go. Perfect for optimal pathfinding and abstract state-space search.
 
 ## What is A*?
 
@@ -25,9 +25,18 @@ The [A* (A-star) algorithm](https://en.wikipedia.org/wiki/A*_search_algorithm) i
 
 While most commonly used as a **Pathfinder**, this library provides a completely domain-agnostic `Solver`. You can use it to solve complex puzzles, optimize network routing, or navigate grids, simply by providing your own `Heuristic`, `Cost`, and `Successors` functions.
 
+<a id="installation"></a>
+# 📦 Installation
+
+GOKe requires **Go 1.23** or newer.
+
+```bash
+go get github.com/kjkrol/goke
+```
+
 ---
 
-## ⚡ Performance
+# ⏱️ Performance
 
 This solver is built for extreme performance. By utilizing Go 1.18+ Generics, custom memory arenas, and highly optimized data structures, we drastically reduce memory allocations and prevent heap escapes during the hot path of the search.
 
@@ -35,7 +44,7 @@ This solver is built for extreme performance. By utilizing Go 1.18+ Generics, cu
 * **`WithIndexedSliceDict`:** Replaces standard Go maps with a pre-allocated slice for tracking visited nodes. It completely eliminates hashing overhead and interface boxing.
 * **Node Arena:** An internal chunk-based memory arena ensures that millions of nodes can be processed with near-zero allocations after the initial setup.
 
-### Benchmarks (Apple M1 Max)
+## Benchmarks (Apple M1 Max)
 
 As the grid size increases, the IndexedSliceDict shows massive scaling advantages. It outperforms the default Go map implementation by nearly **2x** on small grids, and scales up to over **4.3x** faster execution times on large spaces (2048x2048), all while maintaining a perfectly flat memory allocation profile.
 
@@ -59,7 +68,7 @@ As the grid size increases, the IndexedSliceDict shows massive scaling advantage
 
 ---
 
-## 🚀 Getting Started (Pathfinding Example)
+# 🚀 Getting Started (Pathfinding Example)
 
 Here is a step-by-step example of how to configure the solver to find the shortest path on a 2D grid.
 
@@ -72,7 +81,7 @@ type Point struct {
 }
 ```
 
-### Define the Rules (Heuristic, Cost, Successors)
+## Define the Rules (Heuristic, Cost, Successors)
 You must define how the algorithm evaluates the distance to the goal, the cost of moving, and how to find neighboring states.
 ```go
 // 1. Heuristic: Estimates the distance to the goal (e.g., Manhattan distance)
@@ -92,11 +101,15 @@ cost := func(p Point) float64 {
 
 // 3. Successors: Populates the buffer with valid moves from the current state
 dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-successors := func(p Point, buffer []Point) []Point {
+successors := func(p, pp Point, buffer []Point) []Point {
 	for _, d := range dirs {
 		nx, ny := p.X+d.X, p.Y+d.Y
 		// Check bounds and avoid obstacles here
 		if nx >= 0 && nx < 64 && ny >= 0 && ny < 64 {
+			// prevent backtracking
+			if nx == pp.X && ny == pp.Y {
+				continue
+			}
 			buffer = append(buffer, Point{X: nx, Y: ny})
 		}
 	}
@@ -104,7 +117,7 @@ successors := func(p Point, buffer []Point) []Point {
 }
 ```
 
-### Initialize the Solver and Find the Path
+## Initialize the Solver and Find the Path
 Pass your rules into astar.New. To unlock maximum performance, use WithIndexedSliceDict by providing an Indexer that maps your state to a unique integer.
 
 ```go
@@ -131,3 +144,7 @@ if path != nil {
 	fmt.Println("Found path with length:", len(path))
 }
 ```
+
+# License
+
+**kjkrol/astar** is licensed under the MIT License. See the LICENSE [file](./LICENSE) for more details.

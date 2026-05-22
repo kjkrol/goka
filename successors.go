@@ -16,7 +16,7 @@ func newBufferedSuccessors[T comparable](capacity int, generate SuccessorsFunc[T
 	}
 }
 
-func (b *bufferedSuccessors[T]) Successors(current T) []T {
-	b.buf = b.generate(current, b.buf[:0])
+func (b *bufferedSuccessors[T]) Successors(current, parent T) []T {
+	b.buf = b.generate(current, parent, b.buf[:0])
 	return b.buf
 }
