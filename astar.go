@@ -1,4 +1,4 @@
-package goka
+package astar
 
 import (
 	"container/heap"
@@ -6,83 +6,122 @@ import (
 	"slices"
 )
 
-const defaultMapSize = 1024
-
+// Heuristic defines the estimated cost to reach the goal state from the current state.
+//
+// Note on Performance vs. Optimality:
+// To drastically narrow the search space and speed up the solver, the heuristic's
+// contribution should dominate the actual step cost. You can achieve this by multiplying
+// the heuristic result by a weight (e.g., > 1.0) or by reducing the output of the Cost function.
+// This effectively turns the algorithm into Weighted A*, which visits far fewer nodes
+// but sacrifices the guarantee of finding the absolute shortest path.
 type Heuristic[T comparable] func(current, goal T) float64
+
+// Cost defines the exact penalty (weight) for moving into a given state.
+// In a standard A* search, this value should be strictly accurate to guarantee optimal paths.
 type Cost[T comparable] func(T) float64
+
+// SuccessorsFunc defines the rules of movement or state transitions.
+// It populates the provided buffer with all valid, reachable neighbors from the current state
+// and returns it. This is the ideal place to filter out unreachable nodes (like walls or obstacles).
 type SuccessorsFunc[T comparable] func(current T, buffer []T) []T
 
-type AStar[T comparable] struct {
-	open       *open[T]
-	closed     *closed[T]
+// Indexer maps a complex state of type T to a unique, contiguous integer identifier.
+// It is required when using highly optimized internal structures like IndexedSliceDict.
+type Indexer[T comparable] func(T) int
+
+// Solver is a generic, high-performance pathfinding and state-space search engine
+// based on the A* algorithm. It is entirely agnostic to the underlying domain problem.
+type Solver[T comparable] struct {
 	heuristic  Heuristic[T]
 	cost       Cost[T]
-	successors Successors[T]
+	successors *BufferedSuccessors[T]
+	open       *open[T]
+	closed     *closed[T]
+	current    *node[T]
 }
 
-func NewAStar[T comparable](
+// New initializes and returns a new Solver configured with the provided rules
+// (heuristic, cost, and successors) and optional performance tuning parameters (SolverOptions).
+func New[T comparable](
 	heuristic Heuristic[T],
 	cost Cost[T],
-	successors Successors[T],
-	opts ...AStarOption[T],
-) *AStar[T] {
-	cfg := aStarConfig[T]{
-		mapCapacity: defaultMapSize,
-		indexer:     nil,
-	}
+	successors SuccessorsFunc[T],
+	opts ...SolverOption[T],
+) *Solver[T] {
+	cfg := newConfig[T]()
 
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
-	var openDict, closedDict nodeDict[T]
+	openDict := cfg.dictFactory(cfg.capacity)
+	closedDict := cfg.dictFactory(cfg.capacity)
 
-	if cfg.indexer != nil {
-		openDict = newSliceDict(cfg.mapCapacity, cfg.indexer)
-		closedDict = newSliceDict(cfg.mapCapacity, cfg.indexer)
-	} else {
-		openDict = newMapDict[T](cfg.mapCapacity)
-		closedDict = newMapDict[T](cfg.mapCapacity)
-	}
-
-	return &AStar[T]{
+	return &Solver[T]{
 		heuristic:  heuristic,
 		cost:       cost,
-		open:       newOpen[T](openDict),
+		open:       newOpen[T](cfg.capacity, openDict),
 		closed:     newClosed[T](closedDict),
-		successors: successors,
+		successors: NewBufferedSuccessors(cfg.successorCapacity, successors),
 	}
 }
 
-func (a *AStar[T]) Solve(start, goal T) []T {
-	for goalAchieved, current := range a.Iter(start, goal) {
+// Solve executes the search from the start state to the goal state.
+// It runs the iterator to completion and returns the final path.
+// If no path is found, it returns nil.
+func (a *Solver[T]) Solve(start, goal T) []T {
+	for goalAchieved := range a.Iter(start, goal) {
 		if goalAchieved {
-			return current.Path()
+			return a.Result()
 		}
 	}
 	return nil
 }
 
-func (a *AStar[T]) Iter(start, goal T) iter.Seq2[bool, *Node[T]] {
+// Iter returns a Go 1.23 iterator sequence that allows stepping through the algorithm's execution.
+// It yields 'false' while actively searching, and 'true' the moment the goal is reached.
+// This is exceptionally useful for visualizing the pathfinding process, debugging,
+// or aborting the search early based on custom conditions.
+func (a *Solver[T]) Iter(start, goal T) iter.Seq[bool] {
 	a.reset()
 	a.open.insert(start, nil, 0, a.heuristic(start, goal))
-	return func(yield func(bool, *Node[T]) bool) {
+	return func(yield func(bool) bool) {
 		for a.open.isNotEmpty() {
-			current := a.open.removeBest()
-			goalAchieved := (current.ID == goal)
+			a.current = a.open.removeBest()
+			goalAchieved := (a.current.ID == goal)
 			if !goalAchieved {
-				a.process(current, goal)
+				a.process(goal)
 			}
-			if !yield(goalAchieved, current) {
+			if !yield(goalAchieved) {
 				return
 			}
 		}
 	}
 }
 
-func (a *AStar[T]) process(current *Node[T], goal T) {
-	for _, successorID := range a.successors.Successors(current.ID) {
-		G := current.G + a.cost(successorID)
+// Result reconstructs and returns the path from the starting state to the current state.
+// It is typically called immediately after the Iter sequence yields 'true'.
+func (a *Solver[T]) Result() []T {
+	if a.current == nil {
+		return nil
+	}
+
+	var path []T
+	node := a.current
+
+	for node != nil {
+		path = append(path, node.ID)
+		node = node.Parent
+	}
+
+	slices.Reverse(path)
+
+	return path
+}
+
+func (a *Solver[T]) process(goal T) {
+	for _, successorID := range a.successors.Successors(a.current.ID) {
+		G := a.current.G + a.cost(successorID)
 		F := G + a.heuristic(successorID, goal)
 
 		inOpen, hasBetter := a.open.containsBetterOrEqual(successorID, G)
@@ -100,17 +139,28 @@ func (a *AStar[T]) process(current *Node[T], goal T) {
 		}
 
 		if inOpen {
-			a.open.update(successorID, current, G, F)
+			a.open.update(successorID, a.current, G, F)
 		} else {
-			a.open.insert(successorID, current, G, F)
+			a.open.insert(successorID, a.current, G, F)
 		}
 	}
-	a.closed.insert(current)
+	a.closed.insert(a.current)
 }
 
-func (a *AStar[T]) reset() {
+func (a *Solver[T]) reset() {
 	a.closed.reset()
 	a.open.reset()
+	a.current = nil
+}
+
+// ---------------
+// node
+// ---------------
+type node[T comparable] struct {
+	ID     T
+	G, F   float64
+	Parent *node[T]
+	Index  int
 }
 
 // ---------------
@@ -124,7 +174,7 @@ func newClosed[T comparable](dict nodeDict[T]) *closed[T] {
 	return &closed[T]{dict: dict}
 }
 
-func (c *closed[T]) insert(node *Node[T]) {
+func (c *closed[T]) insert(node *node[T]) {
 	c.dict.set(node.ID, node)
 }
 
@@ -153,14 +203,14 @@ type open[T comparable] struct {
 	arena  *nodeArena[T]
 }
 
-func newOpen[T comparable](dict nodeDict[T]) *open[T] {
+func newOpen[T comparable](capacity int, dict nodeDict[T]) *open[T] {
 	openPQ := &openNodesPriorityQueue[T]{}
 	heap.Init(openPQ)
 
 	return &open[T]{
 		openPQ: openPQ,
 		dict:   dict,
-		arena:  newNodeArena[T](),
+		arena:  newNodeArena[T](capacity),
 	}
 }
 
@@ -168,7 +218,7 @@ func (o *open[T]) isNotEmpty() bool {
 	return o.openPQ.Len() > 0
 }
 
-func (o *open[T]) insert(id T, parent *Node[T], g, f float64) {
+func (o *open[T]) insert(id T, parent *node[T], g, f float64) {
 	node := o.arena.Get()
 	node.ID = id
 	node.Parent = parent
@@ -179,7 +229,7 @@ func (o *open[T]) insert(id T, parent *Node[T], g, f float64) {
 	o.dict.set(node.ID, node)
 }
 
-func (o *open[T]) update(id T, parent *Node[T], g, f float64) {
+func (o *open[T]) update(id T, parent *node[T], g, f float64) {
 	if x, ok := o.dict.get(id); ok {
 		x.Parent = parent
 		x.G = g
@@ -189,8 +239,8 @@ func (o *open[T]) update(id T, parent *Node[T], g, f float64) {
 }
 
 // best means the node with the lowest F value, which is at the top of the priority queue
-func (o *open[T]) removeBest() *Node[T] {
-	node := heap.Pop(o.openPQ).(*Node[T])
+func (o *open[T]) removeBest() *node[T] {
+	node := heap.Pop(o.openPQ).(*node[T])
 	o.dict.remove(node.ID)
 	return node
 }
@@ -213,42 +263,14 @@ func (o *open[T]) reset() {
 }
 
 // ---------------
-// Node
-// ---------------
-type Node[T comparable] struct {
-	ID     T
-	G, F   float64
-	Parent *Node[T]
-	Index  int
-}
-
-func (n *Node[T]) Path() []T {
-	if n == nil {
-		return nil
-	}
-
-	var path []T
-	current := n
-
-	for current != nil {
-		path = append(path, current.ID)
-		current = current.Parent
-	}
-
-	slices.Reverse(path)
-
-	return path
-}
-
-// ---------------
 // (internal) Open Nodes Priority (by Node.F) Queue
 // ---------------
-type openNodesPriorityQueue[T comparable] []*Node[T]
+type openNodesPriorityQueue[T comparable] []*node[T]
 
 var _ (heap.Interface) = (*openNodesPriorityQueue[any])(nil)
 
 func (q *openNodesPriorityQueue[T]) Push(x any) {
-	newNode := x.(*Node[T])
+	newNode := x.(*node[T])
 	newNode.Index = len(*q)
 	*q = append(*q, newNode)
 }
@@ -267,135 +289,4 @@ func (q *openNodesPriorityQueue[T]) Swap(i, j int) {
 	(*q)[i].Index = j
 	(*q)[j].Index = i
 	(*q)[i], (*q)[j] = (*q)[j], (*q)[i]
-}
-
-// ---------------
-// Node Arena
-// ---------------
-const arenaChunkSize = 1024
-
-type nodeArena[T comparable] struct {
-	chunks   [][]Node[T]
-	chunkIdx int
-	nodeIdx  int
-}
-
-func newNodeArena[T comparable]() *nodeArena[T] {
-	return &nodeArena[T]{
-		chunks: [][]Node[T]{make([]Node[T], arenaChunkSize)},
-	}
-}
-
-func (a *nodeArena[T]) Get() *Node[T] {
-	if a.nodeIdx >= arenaChunkSize {
-		a.chunkIdx++
-		a.nodeIdx = 0
-		if a.chunkIdx >= len(a.chunks) {
-			a.chunks = append(a.chunks, make([]Node[T], arenaChunkSize))
-		}
-	}
-
-	node := &a.chunks[a.chunkIdx][a.nodeIdx]
-	a.nodeIdx++
-	return node
-}
-
-func (a *nodeArena[T]) Reset() {
-	a.chunkIdx = 0
-	a.nodeIdx = 0
-}
-
-// ---------------
-//	Buffered Successors
-// ---------------
-
-type Successors[T comparable] interface {
-	Successors(current T) []T
-}
-
-type BufferedSuccessors[T comparable] struct {
-	generate SuccessorsFunc[T]
-	buf      []T
-}
-
-func NewBufferedSuccessors[T comparable](capacity int, generate SuccessorsFunc[T]) *BufferedSuccessors[T] {
-	return &BufferedSuccessors[T]{
-		generate: generate,
-		buf:      make([]T, 0, capacity),
-	}
-}
-
-func (b *BufferedSuccessors[T]) Successors(current T) []T {
-	b.buf = b.generate(current, b.buf[:0])
-	return b.buf
-}
-
-// ---------------
-// Internal Node Dictionary
-// ---------------
-type nodeDict[T comparable] interface {
-	get(id T) (*Node[T], bool)
-	set(id T, node *Node[T])
-	remove(id T)
-	clear()
-}
-
-// ---------------
-// Map-based Node Dictionary
-// ---------------
-type mapDict[T comparable] struct {
-	m map[T]*Node[T]
-}
-
-func newMapDict[T comparable](capacity int) *mapDict[T] {
-	return &mapDict[T]{m: make(map[T]*Node[T], capacity)}
-}
-func (d *mapDict[T]) get(id T) (*Node[T], bool) { n, ok := d.m[id]; return n, ok }
-func (d *mapDict[T]) set(id T, node *Node[T])   { d.m[id] = node }
-func (d *mapDict[T]) remove(id T)               { delete(d.m, id) }
-func (d *mapDict[T]) clear()                    { clear(d.m) }
-
-// ---------------
-// Slice-based Node Dictionary (for fixed-size, integer-indexable IDs)
-// ---------------
-type sliceDict[T comparable] struct {
-	nodes   []*Node[T]
-	indexOf func(T) int
-}
-
-func newSliceDict[T comparable](maxSize int, indexer func(T) int) *sliceDict[T] {
-	return &sliceDict[T]{
-		nodes:   make([]*Node[T], maxSize),
-		indexOf: indexer,
-	}
-}
-func (d *sliceDict[T]) get(id T) (*Node[T], bool) {
-	n := d.nodes[d.indexOf(id)]
-	return n, n != nil
-}
-func (d *sliceDict[T]) set(id T, node *Node[T]) { d.nodes[d.indexOf(id)] = node }
-func (d *sliceDict[T]) remove(id T)             { d.nodes[d.indexOf(id)] = nil }
-func (d *sliceDict[T]) clear()                  { clear(d.nodes) }
-
-// ---------------
-// AStar Options
-// ---------------
-type AStarOption[T comparable] func(*aStarConfig[T])
-
-type aStarConfig[T comparable] struct {
-	mapCapacity int
-	indexer     func(T) int
-}
-
-func WithIndexer[T comparable](maxSize int, indexer func(T) int) AStarOption[T] {
-	return func(c *aStarConfig[T]) {
-		c.mapCapacity = maxSize
-		c.indexer = indexer
-	}
-}
-
-func WithMapCapacity[T comparable](capacity int) AStarOption[T] {
-	return func(c *aStarConfig[T]) {
-		c.mapCapacity = capacity
-	}
 }
