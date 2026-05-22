@@ -17,13 +17,19 @@ import (
 type Heuristic[T comparable] func(current, goal T) float64
 
 // Cost defines the exact penalty (weight) for moving into a given state.
-// In a standard A* search, this value should be strictly accurate to guarantee optimal paths.
-type Cost[T comparable] func(T) float64
+//
+// In a standard A* search, all returned values MUST be non-negative (>= 0).
+// Negative costs violate the core assumptions of the algorithm, preventing it
+// from guaranteeing an optimal path and potentially causing infinite loops.
+//
+// If the transition is impossible, do not return an extremely high cost;
+// instead, filter that state out entirely within the SuccessorsFunc.
+type Cost[T comparable] func(state T) float64
 
 // SuccessorsFunc defines the rules of movement or state transitions.
 // It populates the provided buffer with all valid, reachable neighbors from the current state
 // and returns it. This is the ideal place to filter out unreachable nodes (like walls or obstacles).
-type SuccessorsFunc[T comparable] func(current T, buffer []T) []T
+type SuccessorsFunc[T comparable] func(current, parent T, buffer []T) []T
 
 // Indexer maps a complex state of type T to a unique, contiguous integer identifier.
 // It is required when using highly optimized internal structures like IndexedSliceDict.
@@ -120,7 +126,11 @@ func (a *Solver[T]) Result() []T {
 }
 
 func (a *Solver[T]) process(goal T) {
-	for _, successorID := range a.successors.Successors(a.current.ID) {
+	parentID := a.current.ID
+	if a.current.Parent != nil {
+		parentID = a.current.Parent.ID
+	}
+	for _, successorID := range a.successors.Successors(a.current.ID, parentID) {
 		G := a.current.G + a.cost(successorID)
 		F := G + a.heuristic(successorID, goal)
 

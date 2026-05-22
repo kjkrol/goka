@@ -37,8 +37,7 @@ func BenchmarkSolver_Solve(b *testing.B) {
 			goal := Point{X: size - 1, Y: size - 1}
 
 			heuristic := func(p, g Point) float64 {
-				// heuristic should have higher impact on result than cost for better benchmarking
-				return (math.Abs(float64(g.X-p.X)) + math.Abs(float64(g.Y-p.Y))) * 10.0
+				return math.Abs(float64(g.X-p.X)) + math.Abs(float64(g.Y-p.Y))
 			}
 
 			cost := func(p Point) float64 {
@@ -46,10 +45,13 @@ func BenchmarkSolver_Solve(b *testing.B) {
 			}
 
 			dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-			var successors astar.SuccessorsFunc[Point] = func(p Point, buffer []Point) []Point {
+			var successors astar.SuccessorsFunc[Point] = func(p, pp Point, buffer []Point) []Point {
 				for _, d := range dirs {
 					nx, ny := p.X+d.X, p.Y+d.Y
 					if nx >= 0 && nx < size && ny >= 0 && ny < size {
+						if nx == pp.X && ny == pp.Y {
+							continue
+						}
 						if grid[ny][nx] == insurmountableObstacle {
 							continue
 						}
