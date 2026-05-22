@@ -9,7 +9,7 @@ type bufferedSuccessors[T comparable] struct {
 	buf      []T
 }
 
-func NewBufferedSuccessors[T comparable](capacity int, generate SuccessorsFunc[T]) *bufferedSuccessors[T] {
+func newBufferedSuccessors[T comparable](capacity int, generate SuccessorsFunc[T]) *bufferedSuccessors[T] {
 	return &bufferedSuccessors[T]{
 		generate: generate,
 		buf:      make([]T, 0, capacity),

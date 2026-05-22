@@ -62,7 +62,7 @@ func New[T comparable](
 		cost:       cost,
 		open:       newOpen[T](cfg.capacity, openDict),
 		closed:     newClosed[T](closedDict),
-		successors: NewBufferedSuccessors(cfg.successorCapacity, successors),
+		successors: newBufferedSuccessors(cfg.successorCapacity, successors),
 	}
 }
 
