@@ -11,26 +11,32 @@ import (
 // Note on Performance vs. Optimality:
 // To drastically narrow the search space and speed up the solver, the heuristic's
 // contribution should dominate the actual step cost. You can achieve this by multiplying
-// the heuristic result by a weight (e.g., > 1.0) or by reducing the output of the Cost function.
+// the heuristic result by a weight (e.g., > 1.0) or by reducing the step cost.
 // This effectively turns the algorithm into Weighted A*, which visits far fewer nodes
 // but sacrifices the guarantee of finding the absolute shortest path.
 type Heuristic[T comparable] func(current, goal T) float64
 
-// // Cost defines the exact penalty (weight) for moving into a given state.
-// // In a standard A* search, this value should be strictly accurate to guarantee optimal paths.
-// type Cost[T comparable] func(T) float64
-
-// TODO: zaktualizuj godoc
-type Successor[T comparable] struct {
-	ID   T
-	Cost float64
+// Transition represents a valid movement or mutation in the state space,
+// capturing the destination state and the cost incurred to reach it.
+type Transition[T comparable] struct {
+	To   T       // The destination state of this transition.
+	Cost float64 // The edge weight or cost associated with this state change.
 }
 
-// TODO: zaktualizuj godoc
-// Successors defines the rules of movement or state transitions.
-// It populates the provided buffer with all valid, reachable neighbors from the current state
-// and returns it. This is the ideal place to filter out unreachable nodes (like walls or obstacles).
-type Successors[T comparable] func(current, parent T, buffer []Successor[T]) []Successor[T]
+// Transitions defines how states mutate and how transition costs are calculated.
+// It populates the provided reusable buffer with all valid, directly reachable transitions
+// from the current state in a single pass.
+//
+// This decoupled design keeps the Solver strictly generic and agnostic of the underlying
+// graph structure, state representation, or domain-specific cost metrics. It is the
+// ideal place to:
+//  1. Evaluate valid state mutations and compute dynamic transition costs (edge weights).
+//  2. Filter out invalid, blocked, or out-of-bounds states.
+//  3. Prevent immediate backtracking or simple cycles by utilizing the 'parent' state.
+//  4. Perform early pruning by excluding transitions whose cost exceeds custom thresholds.
+//
+// Returns the sliced buffer containing the valid transitions.
+type Transitions[T comparable] func(current, parent T, buffer []Transition[T]) []Transition[T]
 
 // Indexer maps a complex state of type T to a unique, contiguous integer identifier.
 // It is required when using highly optimized internal structures like IndexedSliceDict.
@@ -39,15 +45,15 @@ type Indexer[T comparable] func(T) int
 // Solver is a generic, high-performance pathfinding and state-space search engine
 // based on the A* algorithm. It is entirely agnostic to the underlying domain problem.
 type Solver[T comparable] struct {
-	open         *open[T]
-	closed       *closed[T]
-	heuristic    Heuristic[T]
-	successorBuf []Successor[T]
-	current      *node[T]
+	open          *open[T]
+	closed        *closed[T]
+	heuristic     Heuristic[T]
+	transitionBuf []Transition[T]
+	current       *node[T]
 }
 
-// New initializes and returns a new Solver configured with the provided rules
-// (heuristic, cost, and successors) and optional performance tuning parameters (SolverOptions).
+// New initializes and returns a new Solver configured with the provided
+// heuristic and optional configuration parameters.
 func New[T comparable](
 	heuristic Heuristic[T],
 	opts ...SolverOption[T],
@@ -62,17 +68,17 @@ func New[T comparable](
 	closedDict := cfg.dictFactory(cfg.capacity)
 
 	return &Solver[T]{
-		open:         newOpen[T](cfg.capacity, openDict),
-		closed:       newClosed[T](closedDict),
-		heuristic:    heuristic,
-		successorBuf: make([]Successor[T], 0, cfg.successorCapacity),
+		open:          newOpen[T](cfg.capacity, openDict),
+		closed:        newClosed[T](closedDict),
+		heuristic:     heuristic,
+		transitionBuf: make([]Transition[T], 0, cfg.successorCapacity),
 	}
 }
 
 // Solve executes the search from the start state to the goal state.
 // It runs the iterator to completion and returns the final path.
 // If no path is found, it returns nil.
-func (a *Solver[T]) Solve(start, goal T, successors Successors[T]) []T {
+func (a *Solver[T]) Solve(start, goal T, successors Transitions[T]) []T {
 	for goalAchieved := range a.Iter(start, goal, successors) {
 		if goalAchieved {
 			return a.Result()
@@ -82,20 +88,24 @@ func (a *Solver[T]) Solve(start, goal T, successors Successors[T]) []T {
 }
 
 // Iter returns a Go 1.23 iterator sequence that allows stepping through the algorithm's execution.
-// It yields 'false' while actively searching, and 'true' the moment the goal is reached.
-// This is exceptionally useful for visualizing the pathfinding process, debugging,
-// or aborting the search early based on custom conditions.
-func (a *Solver[T]) Iter(start, goal T, successors Successors[T]) iter.Seq[bool] {
+// It yields 'false' while actively searching, and yields 'true' exactly once the moment
+// the goal state is reached, immediately terminating the sequence afterwards.
+//
+// This is exceptionally useful for visualizing the state space traversal, step-by-step
+// debugging, or aborting the search early based on custom external conditions.
+func (a *Solver[T]) Iter(start, goal T, successors Transitions[T]) iter.Seq[bool] {
 	a.reset()
 	a.open.insert(start, nil, 0, a.heuristic(start, goal))
 	return func(yield func(bool) bool) {
 		for a.open.isNotEmpty() {
 			a.current = a.open.removeBest()
 			goalAchieved := (a.current.ID == goal)
-			if !goalAchieved {
-				a.process(goal, successors)
+			if goalAchieved {
+				yield(true)
+				return
 			}
-			if !yield(goalAchieved) {
+			a.process(goal, successors)
+			if !yield(false) {
 				return
 			}
 		}
@@ -122,13 +132,13 @@ func (a *Solver[T]) Result() []T {
 	return path
 }
 
-func (a *Solver[T]) process(goal T, successors Successors[T]) {
+func (a *Solver[T]) process(goal T, successors Transitions[T]) {
 	parentID := a.current.ID
 	if a.current.Parent != nil {
 		parentID = a.current.Parent.ID
 	}
-	for _, successor := range successors(a.current.ID, parentID, a.successorBuf[:0]) {
-		successorID := successor.ID
+	for _, successor := range successors(a.current.ID, parentID, a.transitionBuf[:0]) {
+		successorID := successor.To
 		G := a.current.G + successor.Cost
 		F := G + a.heuristic(successorID, goal)
 
