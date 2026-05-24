@@ -21,11 +21,10 @@
 
 ## What is A*?
 
-The [A* (A-star) algorithm](https://en.wikipedia.org/wiki/A*_search_algorithm) is a graph traversal and path search algorithm heavily used in computer science due to its completeness, optimality, and optimal efficiency. It is widely considered the best algorithm for finding the shortest path between nodes (e.g., in a 2D grid/map for game development). 
+The [A* (A-star) algorithm](https://en.wikipedia.org/wiki/A*_search_algorithm) is a graph traversal and state-space search algorithm heavily used in computer science due to its completeness, optimality, and optimal efficiency. It is widely considered the industry standard for finding the shortest path or optimal sequence of transitions between nodes.
 
-While most commonly used as a **Pathfinder**, this library provides a completely domain-agnostic `Solver`. You can use it to solve complex puzzles, optimize network routing, or navigate grids, simply by providing your own `Heuristic`, `Cost`, and `Successors` functions.
+While most commonly used as a **Pathfinder**, this library provides a completely domain-agnostic `Solver`. You can use it to solve complex puzzles, optimize network routing, or navigate grids, simply by providing your own `Heuristic` and `Transitions` logic. The Solver remains strictly agnostic of the underlying graph structure or domain-specific cost metrics, making it a universal state-space resolution engine.
 
-<a id="installation"></a>
 # 📦 Installation
 
 GOKe requires **Go 1.23** or newer.
@@ -46,71 +45,92 @@ This solver is built for extreme performance. By utilizing Go 1.18+ Generics, cu
 
 ## Benchmarks (Apple M1 Max)
 
-As the grid size increases, the IndexedSliceDict shows massive scaling advantages. It outperforms the default Go map implementation by nearly **2x** on small grids, and scales up to over **4.3x** faster execution times on large spaces (2048x2048), all while maintaining a perfectly flat memory allocation profile.
+The benchmarks below represent execution metrics under standard A* operational stress (`CostWeight_1.0`), where the algorithm fully evaluates path costs and alternative routes. 
 
-| Grid Size | Dictionary Type | Time (ns/op) | Memory (B/op) | Allocs (allocs/op) |
+As the state space expands, the `IndexedSliceDict` provides massive scaling advantages over map-based lookups. For a large **2048x2048** environment, it reduces execution time from **1.41 seconds down to just 0.54 seconds**—outperforming the standard Go map implementation by **2.6x**.
+
+| Grid Size | Dictionary Type | Time (ms/op) | Memory (kB/op) | Allocs (allocs/op) |
 | :--- | :--- | :--- | :--- | :--- |
-| **64x64** | `IndexedSliceDict` | 20,884 | 4,216 | 12 |
-| | `IndexedMapDict` | 36,467 | 4,216 | 12 |
-| | `DefaultMapDict` | 38,557 | 4,216 | 12 |
-| **256x256** | `IndexedSliceDict` | 108,993 | 16,504 | 14 |
-| | `IndexedMapDict` | 201,557 | 16,507 | 14 |
-| | `DefaultMapDict` | 209,424 | 16,505 | 14 |
-| **512x512** | `IndexedSliceDict` | 256,729 | 50,578 | 16 |
-| | `IndexedMapDict` | 668,239 | 50,561 | 16 |
-| | `DefaultMapDict` | 804,137 | 50,563 | 16 |
-| **1024x1024** | `IndexedSliceDict` | 720,912 | 120,383 | 18 |
-| | `IndexedMapDict` | 2,361,323 | 120,278 | 18 |
-| | `DefaultMapDict` | 3,084,423 | 120,306 | 18 |
-| **2048x2048** | `IndexedSliceDict` | **2,009,488** | 260,743 | **20** |
-| | `IndexedMapDict` | 7,348,637 | 260,084 | 20 |
-| | `DefaultMapDict` | 8,680,021 | 260,230 | 20 |
+| **64x64** | `IndexedSliceDict` | 0.36 ms | 4.2 kB | 12 |
+| | `IndexedMapDict` | 0.58 ms | 4.1 kB | 12 |
+| | `DefaultMapDict` | 0.62 ms | 4.1 kB | 12 |
+| **256x256** | `IndexedSliceDict` | 6.85 ms | 33.2 kB | 14 |
+| | `IndexedMapDict` | 10.98 ms | 16.2 kB | 14 |
+| | `DefaultMapDict` | 11.94 ms | 16.3 kB | 14 |
+| **512x512** | `IndexedSliceDict` | 30.15 ms | 388.3 kB | 16 |
+| | `IndexedMapDict` | 59.11 ms | 49.8 kB | 16 |
+| | `DefaultMapDict` | 60.11 ms | 49.8 kB | 16 |
+| **1024x1024** | `IndexedSliceDict` | 126.10 ms | 6,253.1 kB | 21 |
+| | `IndexedMapDict` | 288.12 ms | 124.6 kB | 21 |
+| | `DefaultMapDict` | 308.14 ms | 124.7 kB | 21 |
+| **2048x2048** | `IndexedSliceDict` | **541.76 ms** | 98,545.3 kB | **34** |
+| | `IndexedMapDict` | 1,411.57 ms | 324.5 kB | 34 |
+| | `DefaultMapDict` | 1,416.12 ms | 324.5 kB | 34 |
 
 ---
 
 # 🚀 Getting Started (Pathfinding Example)
 
-Here is a step-by-step example of how to configure the solver to find the shortest path on a 2D grid.
+Here is a step-by-step example of how to configure the solver to find the optimal path on a 2D terrain grid.
 
-### Define your domain state
-The solver is generic, so you define the state. For a map, a simple `Point` struct works best.
+### Define your domain state and world grid
+The solver is generic, so you define the state representation. For a grid map, a `Point` struct represents coordinates, and a 2D slice simulates the world terrain.
 
 ```go
 type Point struct {
 	X, Y int
 }
+
+const (
+	GridSize = 64
+	
+	// Terrain types and their cost/weights
+	TerrainWalkway = 1.0
+	TerrainMud     = 3.5
+	TerrainWall    = 999.0 // Insurmountable obstacle
+)
+
+// Example world grid layout (pre-allocated or loaded from game data)
+var grid [GridSize][GridSize]float64
 ```
 
-## Define the Rules (Heuristic, Cost, Successors)
-You must define how the algorithm evaluates the distance to the goal, the cost of moving, and how to find neighboring states.
+## Define the Rules (Heuristic & Transitions)
+You must define how the algorithm estimates the remaining distance to the goal and how states mutate based on your grid topography.
+
 ```go
 // 1. Heuristic: Estimates the distance to the goal (e.g., Manhattan distance)
-const weight = 2.0 // Adjust this factor to make the heuristic more or less aggressive
 heuristic := func(current, goal Point) float64 {
 	dx := math.Abs(float64(goal.X - current.X))
 	dy := math.Abs(float64(goal.Y - current.Y))
-	return (dx + dy) * weight
-	// Note: Multiply by a weight > 1.0 here to create a "Weighted A*", 
-	// drastically increasing speed at the cost of absolute optimal paths.
+	return dx + dy
 }
 
-// 2. Cost: The penalty for entering a specific node (e.g., a swamp is harder to cross than a road)
-cost := func(p Point) float64 {
-	return 1.0 // Assume a flat cost for this example
-}
-
-// 3. Successors: Populates the buffer with valid moves from the current state
+// 2. Transitions: Populates the buffer with valid moves and their terrain costs in a single pass.
 dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-successors := func(p, pp Point, buffer []Point) []Point {
+
+transitions := func(p, pp Point, buffer []astar.Transition[Point]) []astar.Transition[Point] {
 	for _, d := range dirs {
 		nx, ny := p.X+d.X, p.Y+d.Y
-		// Check bounds and avoid obstacles here
-		if nx >= 0 && nx < 64 && ny >= 0 && ny < 64 {
-			// prevent backtracking
+		
+		// 1. Boundary check
+		if nx >= 0 && nx < GridSize && ny >= 0 && ny < GridSize {
+			
+			// 2. Prevent immediate backtracking to the parent node
 			if nx == pp.X && ny == pp.Y {
 				continue
 			}
-			buffer = append(buffer, Point{X: nx, Y: ny})
+			
+			// 3. Static obstacle pruning (e.g., skip walls entirely)
+			terrainCost := grid[ny][nx]
+			if terrainCost >= TerrainWall {
+				continue
+			}
+			
+			// 4. Register valid transition with its intrinsic edge weight
+			buffer = append(buffer, astar.Transition[Point]{
+				To:   Point{X: nx, Y: ny},
+				Cost: terrainCost, 
+			})
 		}
 	}
 	return buffer
@@ -118,30 +138,29 @@ successors := func(p, pp Point, buffer []Point) []Point {
 ```
 
 ## Initialize the Solver and Find the Path
-Pass your rules into astar.New. To unlock maximum performance, use WithIndexedSliceDict by providing an Indexer that maps your state to a unique integer.
+Pass your static heuristic into `astar.New`. To unlock maximum performance on fixed state spaces, use `WithIndexedSliceDict` by providing an indexer function mapped to your grid dimensions.
 
 ```go
-// The Indexer maps a 2D coordinate to a 1D slice index
+// The Indexer maps a 2D coordinate to a unique 1D slice index
 indexer := func(p Point) int { 
-    return p.Y * 64 + p.X 
+	return p.Y * GridSize + p.X 
 }
-maxNodes := 64 * 64
+maxNodes := GridSize * GridSize
 
-// Initialize the Solver
-finder := astar.New(heuristic, cost, successors,
-	astar.WithSuccessorCapacity[Point](4), // Pre-allocate buffer for 4 directions
+// Initialize the Solver with static configuration
+solver := astar.New(
+	heuristic,
 	astar.WithIndexedSliceDict(maxNodes, indexer),
 )
 
 start := Point{X: 0, Y: 0}
 goal := Point{X: 63, Y: 63}
 
-// Execute the search
-finder.Solve(start, goal)
-path := finder.Result()
+// Execute the search by injecting the grid transition rules
+path := solver.Solve(start, goal, transitions)
 
 if path != nil {
-	fmt.Println("Found path with length:", len(path))
+	fmt.Println("Found optimal path with steps:", len(path))
 }
 ```
 
