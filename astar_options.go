@@ -52,6 +52,6 @@ func WithIndexedMapDict[T comparable](indexer Indexer[T]) SolverOption[T] {
 // guarantees zero allocations for successor retrieval from the very first search iteration.
 func WithSuccessorCapacity[T comparable](capacity int) SolverOption[T] {
 	return func(cfg *config[T]) {
-		cfg.successorCapacity = capacity
+		cfg.transitionsCap = capacity
 	}
 }

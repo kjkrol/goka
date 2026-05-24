@@ -95,28 +95,28 @@ var grid [GridSize][GridSize]float64
 ```
 
 ## Define the Rules (Heuristic & Transitions)
-You must define how the algorithm estimates the remaining distance to the goal and how states mutate based on your grid topography.
+You must define how the algorithm estimates the remaining distance to the target and how states mutate based on your grid topography.
 
 ```go
-// 1. Heuristic: Estimates the distance to the goal (e.g., Manhattan distance)
-heuristic := func(current, goal Point) float64 {
-	dx := math.Abs(float64(goal.X - current.X))
-	dy := math.Abs(float64(goal.Y - current.Y))
+// 1. Heuristic: Estimates the distance to the target (e.g., Manhattan distance)
+heuristic := func(from, to Point) float64 {
+	dx := math.Abs(float64(to.X - from.X))
+	dy := math.Abs(float64(to.Y - from.Y))
 	return dx + dy
 }
 
 // 2. Transitions: Populates the buffer with valid moves and their terrain costs in a single pass.
 dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
 
-transitions := func(p, pp Point, buffer []astar.Transition[Point]) []astar.Transition[Point] {
+transitions := func(from, prev Point, buffer []astar.Transition[Point]) []astar.Transition[Point] {
 	for _, d := range dirs {
-		nx, ny := p.X+d.X, p.Y+d.Y
+		nx, ny := from.X+d.X, from.Y+d.Y
 		
 		// 1. Boundary check
 		if nx >= 0 && nx < GridSize && ny >= 0 && ny < GridSize {
 			
 			// 2. Prevent immediate backtracking to the parent node
-			if nx == pp.X && ny == pp.Y {
+			if nx == prev.X && ny == prev.Y {
 				continue
 			}
 			
@@ -154,10 +154,10 @@ solver := astar.New(
 )
 
 start := Point{X: 0, Y: 0}
-goal := Point{X: 63, Y: 63}
+target := Point{X: 63, Y: 63}
 
 // Execute the search by injecting the grid transition rules
-path := solver.Solve(start, goal, transitions)
+path := solver.Solve(start, target, transitions)
 
 if path != nil {
 	fmt.Println("Found optimal path with steps:", len(path))

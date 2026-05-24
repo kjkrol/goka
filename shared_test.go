@@ -54,14 +54,14 @@ func setupPathFinder(
 func setupTransitions(costWeight float64, grid [][]float64) astar.Transitions[Point] {
 	size := len(grid)
 	dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-	var transitions astar.Transitions[Point] = func(
-		p, pp Point,
+	return func(
+		from, prev Point,
 		buf []astar.Transition[Point],
 	) []astar.Transition[Point] {
 		for _, d := range dirs {
-			nx, ny := p.X+d.X, p.Y+d.Y
+			nx, ny := from.X+d.X, from.Y+d.Y
 			if nx >= 0 && nx < size && ny >= 0 && ny < size {
-				if nx == pp.X && ny == pp.Y {
+				if nx == prev.X && ny == prev.Y {
 					continue
 				}
 
@@ -79,5 +79,4 @@ func setupTransitions(costWeight float64, grid [][]float64) astar.Transitions[Po
 		}
 		return buf
 	}
-	return transitions
 }
