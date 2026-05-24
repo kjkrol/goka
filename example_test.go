@@ -11,7 +11,9 @@ type Point struct {
 	X, Y int
 }
 
-func setupPathFinder(opts ...astar.SolverOption[Point]) (*astar.Solver[Point], Point, Point) {
+func setupPathFinder(
+	opts ...astar.SolverOption[Point],
+) (*astar.Solver[Point], Point, Point, astar.Successors[Point]) {
 	const size = 64
 	const insurmountableObstacle = 100.0
 
@@ -37,40 +39,44 @@ func setupPathFinder(opts ...astar.SolverOption[Point]) (*astar.Solver[Point], P
 	goal := Point{X: 63, Y: 63}
 
 	heuristic := func(p, g Point) float64 {
-		// heuristic should have higher impact on result than cost for better benchmarking
-		return (math.Abs(float64(g.X-p.X)) + math.Abs(float64(g.Y-p.Y))) * 10.0
-	}
-
-	cost := func(p Point) float64 {
-		return grid[p.Y][p.X]
+		return (math.Abs(float64(g.X-p.X)) + math.Abs(float64(g.Y-p.Y)))
 	}
 
 	dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-	var successors astar.SuccessorsFunc[Point] = func(p Point, buffer []Point) []Point {
+	// heuristic should have higher impact on result than cost for better benchmarking
+	costWeight := 0.1
+	var successors astar.Successors[Point] = func(
+		p Point,
+		buf []astar.Successor[Point],
+	) []astar.Successor[Point] {
 		for _, d := range dirs {
 			nx, ny := p.X+d.X, p.Y+d.Y
 			if nx >= 0 && nx < size && ny >= 0 && ny < size {
-				if grid[ny][nx] == insurmountableObstacle {
+				cost := grid[ny][nx] * costWeight
+				if cost >= insurmountableObstacle {
 					continue
 				}
-				buffer = append(buffer, Point{X: nx, Y: ny})
+				buf = append(buf, astar.Successor[Point]{
+					ID:   Point{X: nx, Y: ny},
+					Cost: cost,
+				})
 			}
 		}
-		return buffer
+		return buf
 	}
 
-	pathFinder := astar.New(heuristic, cost, successors, opts...)
+	pathFinder := astar.New(heuristic, opts...)
 
-	return pathFinder, start, goal
+	return pathFinder, start, goal, successors
 }
 
 // --- Iter Examples ---
 
 func ExampleSolver_Iter_defaultDict() {
-	pathFinder, start, goal := setupPathFinder()
+	pathFinder, start, goal, successors := setupPathFinder()
 
 	var path []Point
-	for goalAchieved := range pathFinder.Iter(start, goal) {
+	for goalAchieved := range pathFinder.Iter(start, goal, successors) {
 		if goalAchieved {
 			path = pathFinder.Result()
 			break
@@ -95,13 +101,13 @@ func ExampleSolver_Iter_defaultDict() {
 
 func ExampleSolver_Iter_indexedMapDict() {
 	indexer := func(p Point) int { return p.Y*64 + p.X }
-	pathFinder, start, goal := setupPathFinder(
+	pathFinder, start, goal, successors := setupPathFinder(
 		astar.WithInitCapacity[Point](64*64),
 		astar.WithIndexedMapDict(indexer),
 	)
 
 	var path []Point
-	for goalAchieved := range pathFinder.Iter(start, goal) {
+	for goalAchieved := range pathFinder.Iter(start, goal, successors) {
 		if goalAchieved {
 			path = pathFinder.Result()
 			break
@@ -126,12 +132,12 @@ func ExampleSolver_Iter_indexedMapDict() {
 
 func ExampleSolver_Iter_indexedSliceDict() {
 	indexer := func(p Point) int { return p.Y*64 + p.X }
-	pathFinder, start, goal := setupPathFinder(
+	pathFinder, start, goal, successors := setupPathFinder(
 		astar.WithIndexedSliceDict(64*64, indexer),
 	)
 
 	var path []Point
-	for goalAchieved := range pathFinder.Iter(start, goal) {
+	for goalAchieved := range pathFinder.Iter(start, goal, successors) {
 		if goalAchieved {
 			path = pathFinder.Result()
 			break
@@ -157,9 +163,9 @@ func ExampleSolver_Iter_indexedSliceDict() {
 // --- Solve Examples ---
 
 func ExampleSolver_Solve_defaultDict() {
-	pathFinder, start, goal := setupPathFinder()
+	pathFinder, start, goal, successors := setupPathFinder()
 
-	path := pathFinder.Solve(start, goal)
+	path := pathFinder.Solve(start, goal, successors)
 
 	if len(path) > 0 {
 		fmt.Println("Path found:", true)
@@ -179,12 +185,12 @@ func ExampleSolver_Solve_defaultDict() {
 
 func ExampleSolver_Solve_indexedMapDict() {
 	indexer := func(p Point) int { return p.Y*64 + p.X }
-	pathFinder, start, goal := setupPathFinder(
+	pathFinder, start, goal, successors := setupPathFinder(
 		astar.WithInitCapacity[Point](64*64),
 		astar.WithIndexedMapDict(indexer),
 	)
 
-	path := pathFinder.Solve(start, goal)
+	path := pathFinder.Solve(start, goal, successors)
 
 	if len(path) > 0 {
 		fmt.Println("Path found:", true)
@@ -204,11 +210,11 @@ func ExampleSolver_Solve_indexedMapDict() {
 
 func ExampleSolver_Solve_indexedSliceDict() {
 	indexer := func(p Point) int { return p.Y*64 + p.X }
-	pathFinder, start, goal := setupPathFinder(
+	pathFinder, start, goal, successors := setupPathFinder(
 		astar.WithIndexedSliceDict(64*64, indexer),
 	)
 
-	path := pathFinder.Solve(start, goal)
+	path := pathFinder.Solve(start, goal, successors)
 
 	if len(path) > 0 {
 		fmt.Println("Path found:", true)

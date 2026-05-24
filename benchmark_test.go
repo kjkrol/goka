@@ -37,62 +37,66 @@ func BenchmarkSolver_Solve(b *testing.B) {
 			goal := Point{X: size - 1, Y: size - 1}
 
 			heuristic := func(p, g Point) float64 {
-				// heuristic should have higher impact on result than cost for better benchmarking
-				return (math.Abs(float64(g.X-p.X)) + math.Abs(float64(g.Y-p.Y))) * 10.0
-			}
-
-			cost := func(p Point) float64 {
-				return grid[p.Y][p.X]
+				return (math.Abs(float64(g.X-p.X)) + math.Abs(float64(g.Y-p.Y)))
 			}
 
 			dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-			var successors astar.SuccessorsFunc[Point] = func(p Point, buffer []Point) []Point {
+			// heuristic should have higher impact on result than cost for better benchmarking
+			costWeight := 0.1
+			var successors astar.Successors[Point] = func(
+				p Point,
+				buf []astar.Successor[Point],
+			) []astar.Successor[Point] {
 				for _, d := range dirs {
 					nx, ny := p.X+d.X, p.Y+d.Y
 					if nx >= 0 && nx < size && ny >= 0 && ny < size {
-						if grid[ny][nx] == insurmountableObstacle {
+						cost := grid[ny][nx] * costWeight
+						if cost >= insurmountableObstacle {
 							continue
 						}
-						buffer = append(buffer, Point{X: nx, Y: ny})
+						buf = append(buf, astar.Successor[Point]{
+							ID:   Point{X: nx, Y: ny},
+							Cost: cost,
+						})
 					}
 				}
-				return buffer
+				return buf
 			}
 
 			indexer := func(p Point) int { return p.Y*size + p.X }
 			maxSize := size * size
 
 			b.Run("WithIndexedSliceDict", func(b *testing.B) {
-				pathFinder := astar.New(heuristic, cost, successors,
+				pathFinder := astar.New(heuristic,
 					astar.WithIndexedSliceDict(maxSize, indexer),
 				)
 
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					_ = pathFinder.Solve(start, goal)
+					_ = pathFinder.Solve(start, goal, successors)
 				}
 			})
 
 			b.Run("WithIndexedMapDict", func(b *testing.B) {
-				pathFinder := astar.New(heuristic, cost, successors,
+				pathFinder := astar.New(heuristic,
 					astar.WithInitCapacity[Point](maxSize),
 					astar.WithIndexedMapDict(indexer),
 				)
 
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					_ = pathFinder.Solve(start, goal)
+					_ = pathFinder.Solve(start, goal, successors)
 				}
 			})
 
 			b.Run("DefaultMapDict", func(b *testing.B) {
-				pathFinder := astar.New(heuristic, cost, successors,
+				pathFinder := astar.New(heuristic,
 					astar.WithInitCapacity[Point](maxSize),
 				)
 
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					_ = pathFinder.Solve(start, goal)
+					_ = pathFinder.Solve(start, goal, successors)
 				}
 			})
 		})

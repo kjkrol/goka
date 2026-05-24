@@ -16,14 +16,21 @@ import (
 // but sacrifices the guarantee of finding the absolute shortest path.
 type Heuristic[T comparable] func(current, goal T) float64
 
-// Cost defines the exact penalty (weight) for moving into a given state.
-// In a standard A* search, this value should be strictly accurate to guarantee optimal paths.
-type Cost[T comparable] func(T) float64
+// // Cost defines the exact penalty (weight) for moving into a given state.
+// // In a standard A* search, this value should be strictly accurate to guarantee optimal paths.
+// type Cost[T comparable] func(T) float64
 
-// SuccessorsFunc defines the rules of movement or state transitions.
+// TODO: zaktualizuj godoc
+type Successor[T comparable] struct {
+	ID   T
+	Cost float64
+}
+
+// TODO: zaktualizuj godoc
+// Successors defines the rules of movement or state transitions.
 // It populates the provided buffer with all valid, reachable neighbors from the current state
 // and returns it. This is the ideal place to filter out unreachable nodes (like walls or obstacles).
-type SuccessorsFunc[T comparable] func(current T, buffer []T) []T
+type Successors[T comparable] func(current T, buffer []Successor[T]) []Successor[T]
 
 // Indexer maps a complex state of type T to a unique, contiguous integer identifier.
 // It is required when using highly optimized internal structures like IndexedSliceDict.
@@ -32,20 +39,17 @@ type Indexer[T comparable] func(T) int
 // Solver is a generic, high-performance pathfinding and state-space search engine
 // based on the A* algorithm. It is entirely agnostic to the underlying domain problem.
 type Solver[T comparable] struct {
-	heuristic  Heuristic[T]
-	cost       Cost[T]
-	successors *bufferedSuccessors[T]
-	open       *open[T]
-	closed     *closed[T]
-	current    *node[T]
+	open         *open[T]
+	closed       *closed[T]
+	heuristic    Heuristic[T]
+	successorBuf []Successor[T]
+	current      *node[T]
 }
 
 // New initializes and returns a new Solver configured with the provided rules
 // (heuristic, cost, and successors) and optional performance tuning parameters (SolverOptions).
 func New[T comparable](
 	heuristic Heuristic[T],
-	cost Cost[T],
-	successors SuccessorsFunc[T],
 	opts ...SolverOption[T],
 ) *Solver[T] {
 	cfg := newConfig[T]()
@@ -58,19 +62,18 @@ func New[T comparable](
 	closedDict := cfg.dictFactory(cfg.capacity)
 
 	return &Solver[T]{
-		heuristic:  heuristic,
-		cost:       cost,
-		open:       newOpen[T](cfg.capacity, openDict),
-		closed:     newClosed[T](closedDict),
-		successors: newBufferedSuccessors(cfg.successorCapacity, successors),
+		open:         newOpen[T](cfg.capacity, openDict),
+		closed:       newClosed[T](closedDict),
+		heuristic:    heuristic,
+		successorBuf: make([]Successor[T], 0, cfg.successorCapacity),
 	}
 }
 
 // Solve executes the search from the start state to the goal state.
 // It runs the iterator to completion and returns the final path.
 // If no path is found, it returns nil.
-func (a *Solver[T]) Solve(start, goal T) []T {
-	for goalAchieved := range a.Iter(start, goal) {
+func (a *Solver[T]) Solve(start, goal T, successors Successors[T]) []T {
+	for goalAchieved := range a.Iter(start, goal, successors) {
 		if goalAchieved {
 			return a.Result()
 		}
@@ -82,7 +85,7 @@ func (a *Solver[T]) Solve(start, goal T) []T {
 // It yields 'false' while actively searching, and 'true' the moment the goal is reached.
 // This is exceptionally useful for visualizing the pathfinding process, debugging,
 // or aborting the search early based on custom conditions.
-func (a *Solver[T]) Iter(start, goal T) iter.Seq[bool] {
+func (a *Solver[T]) Iter(start, goal T, successors Successors[T]) iter.Seq[bool] {
 	a.reset()
 	a.open.insert(start, nil, 0, a.heuristic(start, goal))
 	return func(yield func(bool) bool) {
@@ -90,7 +93,7 @@ func (a *Solver[T]) Iter(start, goal T) iter.Seq[bool] {
 			a.current = a.open.removeBest()
 			goalAchieved := (a.current.ID == goal)
 			if !goalAchieved {
-				a.process(goal)
+				a.process(goal, successors)
 			}
 			if !yield(goalAchieved) {
 				return
@@ -119,9 +122,10 @@ func (a *Solver[T]) Result() []T {
 	return path
 }
 
-func (a *Solver[T]) process(goal T) {
-	for _, successorID := range a.successors.Successors(a.current.ID) {
-		G := a.current.G + a.cost(successorID)
+func (a *Solver[T]) process(goal T, successors Successors[T]) {
+	for _, successor := range successors(a.current.ID, a.successorBuf[:0]) {
+		successorID := successor.ID
+		G := a.current.G + successor.Cost
 		F := G + a.heuristic(successorID, goal)
 
 		inOpen, hasBetter := a.open.containsBetterOrEqual(successorID, G)
