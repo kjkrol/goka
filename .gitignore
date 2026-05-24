@@ -1,0 +1,40 @@
+# Go build cache / artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Wasm build artifacts
+cmd/wasm-demo/main.wasm
+cmd/wasm-demo/wasm_exec.js
+cmd/wasm-demo/server.log
+
+# Go temporary build output
+*.out
+
+# Root-level executables (np. jak coś zbudujesz przez go build ./...)
+/server
+/*.wasm
+/*.exe
+/*.out
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Go
+.gocache
+go.work
+go.work.sum
+
+# Temp bench results
+bench_results/
+

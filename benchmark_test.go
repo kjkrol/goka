@@ -44,12 +44,15 @@ func BenchmarkSolver_Solve(b *testing.B) {
 			// heuristic should have higher impact on result than cost for better benchmarking
 			costWeight := 0.1
 			var successors astar.Successors[Point] = func(
-				p Point,
+				p, pp Point,
 				buf []astar.Successor[Point],
 			) []astar.Successor[Point] {
 				for _, d := range dirs {
 					nx, ny := p.X+d.X, p.Y+d.Y
 					if nx >= 0 && nx < size && ny >= 0 && ny < size {
+						if nx == pp.X && ny == pp.Y {
+							continue
+						}
 						cost := grid[ny][nx] * costWeight
 						if cost >= insurmountableObstacle {
 							continue

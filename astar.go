@@ -30,7 +30,7 @@ type Successor[T comparable] struct {
 // Successors defines the rules of movement or state transitions.
 // It populates the provided buffer with all valid, reachable neighbors from the current state
 // and returns it. This is the ideal place to filter out unreachable nodes (like walls or obstacles).
-type Successors[T comparable] func(current T, buffer []Successor[T]) []Successor[T]
+type Successors[T comparable] func(current, parent T, buffer []Successor[T]) []Successor[T]
 
 // Indexer maps a complex state of type T to a unique, contiguous integer identifier.
 // It is required when using highly optimized internal structures like IndexedSliceDict.
@@ -123,7 +123,11 @@ func (a *Solver[T]) Result() []T {
 }
 
 func (a *Solver[T]) process(goal T, successors Successors[T]) {
-	for _, successor := range successors(a.current.ID, a.successorBuf[:0]) {
+	parentID := a.current.ID
+	if a.current.Parent != nil {
+		parentID = a.current.Parent.ID
+	}
+	for _, successor := range successors(a.current.ID, parentID, a.successorBuf[:0]) {
 		successorID := successor.ID
 		G := a.current.G + successor.Cost
 		F := G + a.heuristic(successorID, goal)
