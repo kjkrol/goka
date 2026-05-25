@@ -109,8 +109,7 @@ heuristic := func(from, to Point) float64 {
 
 Pass your static heuristic into astar.New. To unlock maximum performance on fixed state spaces, use WithIndexedSliceDict by providing an indexer function mapped to your grid dimensions.
 
-**Note:** The solver allocates its internal memory structures once during initialization. You can reuse this single solver instance across multiple execution threads or distinct pathfinding queries.
-
+**Note:** The solver allocates its internal memory structures once during initialization. This instance is designed to be reused sequentially across multiple distinct pathfinding queries to avoid GC pressure. It is not thread-safe; if you need concurrent pathfinding, use separate solver instances per goroutine or orchestrate them via a pool.
 ```go
 // The Indexer maps a 2D coordinate to a unique 1D slice index
 indexer := func(p Point) int { 
