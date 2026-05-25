@@ -74,7 +74,7 @@ As the state space expands, the `IndexedSliceDict` provides massive scaling adva
 Here is a step-by-step example of how to configure the solver to find the optimal path on a 2D terrain grid.
 
 ### Define your domain state and world grid
-The solver is generic, so you define the state representation. For a grid map, a `Point` struct represents coordinates, and a 2D slice simulates the world terrain.
+The solver is generic, so you define the state representation. For a grid map, a Point struct represents coordinates, and a 2D slice simulates the world terrain.
 
 ```go
 type Point struct {
@@ -94,18 +94,43 @@ const (
 var grid [GridSize][GridSize]float64
 ```
 
-## Define the Rules (Heuristic & Transitions)
-You must define how the algorithm estimates the remaining distance to the target and how states mutate based on your grid topography.
+Additionally, you need to define a heuristic function (e.g., Manhattan distance) to estimate the remaining distance to the target:
 
 ```go
-// 1. Heuristic: Estimates the distance to the target (e.g., Manhattan distance)
+// Heuristic is part of your domain definition
 heuristic := func(from, to Point) float64 {
 	dx := math.Abs(float64(to.X - from.X))
 	dy := math.Abs(float64(to.Y - from.Y))
 	return dx + dy
 }
+```
 
-// 2. Transitions: Populates the buffer with valid moves and their terrain costs in a single pass.
+### Initialize the Solver
+
+Pass your static heuristic into astar.New. To unlock maximum performance on fixed state spaces, use WithIndexedSliceDict by providing an indexer function mapped to your grid dimensions.
+
+**Note:** The solver allocates its internal memory structures once during initialization. You can reuse this single solver instance across multiple execution threads or distinct pathfinding queries.
+
+```go
+// The Indexer maps a 2D coordinate to a unique 1D slice index
+indexer := func(p Point) int { 
+	return p.Y * GridSize + p.X 
+}
+maxNodes := GridSize * GridSize
+
+// Initialize the Solver once with static configuration
+solver := astar.New(
+	heuristic,
+	astar.WithIndexedSliceDict(maxNodes, indexer),
+)
+```
+
+### Define Rules & Execute Search (Reusing Buffers)
+
+Every time you call Solve(), you pass a transition rule. This allows you to dynamicly change movement logic on the fly without reallocating solver internal buffers, ensuring zero-allocation hot paths.
+
+```go
+// Transitions: Populates the pre-allocated buffer with valid moves and terrain costs in a single pass.
 dirs := []Point{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
 
 transitions := func(from, prev Point, buffer []astar.Transition[Point]) []astar.Transition[Point] {
@@ -135,28 +160,11 @@ transitions := func(from, prev Point, buffer []astar.Transition[Point]) []astar.
 	}
 	return buffer
 }
-```
-
-## Initialize the Solver and Find the Path
-Pass your static heuristic into `astar.New`. To unlock maximum performance on fixed state spaces, use `WithIndexedSliceDict` by providing an indexer function mapped to your grid dimensions.
-
-```go
-// The Indexer maps a 2D coordinate to a unique 1D slice index
-indexer := func(p Point) int { 
-	return p.Y * GridSize + p.X 
-}
-maxNodes := GridSize * GridSize
-
-// Initialize the Solver with static configuration
-solver := astar.New(
-	heuristic,
-	astar.WithIndexedSliceDict(maxNodes, indexer),
-)
 
 start := Point{X: 0, Y: 0}
 target := Point{X: 63, Y: 63}
 
-// Execute the search by injecting the grid transition rules
+// Execute the search by injecting the grid transition rules into the reused solver
 path := solver.Solve(start, target, transitions)
 
 if path != nil {
